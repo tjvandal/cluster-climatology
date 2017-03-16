@@ -1,7 +1,7 @@
 import boto
 import os
 
-save_dir = "/Users/tj/Downloads/nex"
+save_dir = "/gss_gpfs_scratch/vandal.t/data-mining-project/nex"
 
 def check_dir(dirname):
     if not os.path.exists(dirname):
@@ -25,10 +25,10 @@ def download():
             v_path = os.path.join(run_path, v)
             check_dir(v_path)
             for key in bucket.list(s3_dir % (r, v)):
+                count += 1
+                print "Downloading File Number:", count
                 fname = os.path.join(v_path,os.path.basename(key.name))
                 key.get_contents_to_filename(fname)
-                return
-    print "File count:", count
 
 if __name__ == "__main__":
     download()
