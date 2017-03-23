@@ -1,4 +1,4 @@
-import os
+import os, sys
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -13,13 +13,18 @@ Data that I need:
 
 BASE_PATH = '/gss_gpfs_scratch/vandal.t/data-mining-project'
 NEX_PATH = os.path.join(BASE_PATH, 'nex')
-TMP_PATH = os.path.join(BASE_PATH, 'tmp-all')
-if not os.path.exists(TMP_PATH):
-    os.mkdir(TMP_PATH)
+MONTHLY_PATH = os.path.join(BASE_PATH, 'ccsm4-monthly')
+if not os.path.exists(MONTHLY_PATH):
+    os.mkdir(MONTHLY_PATH)
 
-def main():
+def daily_to_monthly():
     scenarios = os.listdir(NEX_PATH)
+    #scenarios = ['historical']
     for s in scenarios:
+        if s == 'historical':
+            min_year, max_year = 1950, 1999
+        else:
+            min_year, max_year = 2050, 2099
         s_path = os.path.join(NEX_PATH, s)
         variables = os.listdir(s_path)
         for v in variables:
@@ -29,32 +34,43 @@ def main():
             v_path  = os.path.join(s_path, v)
             paths = sorted([os.path.join(v_path, p) for p in os.listdir(v_path)])
             for p in paths:
-                ds = xr.open_dataset(p, engine='netcdf4')
-                dagg = ds.resample('A', dim='time', how='mean')
-                dss.append(dagg)
+                y = int(os.path.basename(p).split("_")[5][:4])
+                if (y >= min_year) and (y <= max_year):
+                    ds = xr.open_dataset(p, engine='netcdf4')
+                    dagg = ds.resample('MS', dim='time', how='mean')
+                    dss.append(dagg)
+                #if len(dss) >= 3:
+                #    break
             dss = xr.concat(dss, dim='time')
-            tmp_path = os.path.join(TMP_PATH, '%s_%s.nc' % (s, v))
-            dss.to_netcdf(tmp_path)
+            path = os.path.join(MONTHLY_PATH, '%s_%s_monthly.nc' % (s, v))
+            dss.to_netcdf(path)
 
-def build_table():
+def build_anomaly_table():
     '''
     lat,lon,pr_1,pr_2,...,pr_n,tasmin_1,...,tasmin_n,tasmax_1,...,taxmax_n
     '''
-    scenarios = os.listdir(NEX_PATH)
+    #scenarios = os.listdir(NEX_PATH)
+    scenarios = ['historical']
     variables = sorted(os.listdir(os.path.join(NEX_PATH, scenarios[0])))
     for s in scenarios:
         files = []
         data = []
         for v in variables:
-            files.append(os.path.join(TMP_PATH, '%s_%s.nc' % (s, v)))
-        ds = xr.open_mfdataset(files, engine='netcdf4')
-        df = ds[variables].to_dataframe().unstack(2).dropna()
-        df.reset_index().to_csv(os.path.join(BASE_PATH, '%s.csv' % s), index=False)
-        print s, v
+            files.append(os.path.join(MONTHLY_PATH, '%s_%s_monthly.nc' % (s, v)))
+
+        ds = xr.open_mfdataset(files, engine='netcdf4')#.isel(time=range(12*5))
+        climatology = ds.groupby('time.month').mean('time')
+        anomalies = ds.groupby('time.month') - climatology
+        idxs = np.where(ds['time.season'] == 'JJA')[0]
+        anomalies = ds.isel(time=idxs)
+        df = anomalies[variables].to_dataframe().unstack(2).dropna()
+        print "Shape of table:",df.shape
+        df.reset_index().to_csv(os.path.join(BASE_PATH, 'anomaly_JJA_%s.csv' % s), index=False)
 
 class ClimateData(object):
     def __init__(self, base_dir):
         self.scenarios = ['historical', 'rcp45', 'rcp85']
+        #self.scenarios = ['historical',]
         self.base_dir = base_dir
         for s in self.scenarios:
             df = pd.read_csv(os.path.join(self.base_dir, '%s.csv' % s), skiprows=[1])
@@ -72,8 +88,18 @@ class _Scenario(object):
         idxs = np.random.choice(range(self.x.shape[0]), batch_size)
         return self.x[idxs], self.latlon[idxs]
 
+    def generate_epoch(self, batch_size):
+        n_rows = self.x.shape[0]
+        curr_row = 0
+        idxs = range(n_rows)
+        np.random.shuffle(idxs)
+        while curr_row < n_rows:
+            curr_idxs = idxs[curr_row:curr_row+batch_size]
+            curr_row += batch_size
+            yield self.x[curr_idxs], self.latlon[curr_idxs]
+
 if __name__ == "__main__":
-    # main()
-    build_table()
-    #c = ClimateData(BASE_PATH)
-    #print c.historical.next_batch(10)
+    #daily_to_monthly()
+    #build_anomaly_table()
+    c = ClimateData(BASE_PATH)
+    print c.historical.x.shape
