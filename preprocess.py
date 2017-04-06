@@ -67,13 +67,35 @@ def build_anomaly_table():
         print "Shape of table:",df.shape
         df.reset_index().to_csv(os.path.join(BASE_PATH, 'anomaly_JJA_%s.csv' % s), index=False)
 
+def build_climatology_table():
+    '''
+    lat,lon,pr_1,pr_2,...,pr_n,tasmin_1,...,tasmin_n,tasmax_1,...,taxmax_n
+    '''
+    scenarios = os.listdir(NEX_PATH)
+    variables = sorted(os.listdir(os.path.join(NEX_PATH, scenarios[0])))
+    for s in scenarios:
+        files = []
+        data = []
+        for v in variables:
+            files.append(os.path.join(MONTHLY_PATH, '%s_%s_monthly.nc' % (s, v)))
+
+        ds = xr.open_mfdataset(files, engine='netcdf4')#.isel(time=range(12*2))
+        grouped = ds.groupby('time.month')
+        mu = grouped.mean('time')
+        std = grouped.std('time')
+        df1 = mu[variables].to_dataframe().unstack(2).dropna()
+        df2 = std[variables].to_dataframe().unstack(2).dropna()
+        df = pd.concat([df1, df2], axis=1)
+        print "Scenario: %s, Shape of table:" % s, df.shape
+        df.reset_index().to_csv(os.path.join(BASE_PATH, 'CONUS_%s.csv' % s), index=False)
+
 class ClimateData(object):
     def __init__(self, base_dir):
         self.scenarios = ['historical', 'rcp45', 'rcp85']
         #self.scenarios = ['historical',]
         self.base_dir = base_dir
         for s in self.scenarios:
-            df = pd.read_csv(os.path.join(self.base_dir, '%s.csv' % s), skiprows=[1])
+            df = pd.read_csv(os.path.join(self.base_dir, 'CONUS_%s.csv' % s), skiprows=[1])
             scenario = _Scenario(df.values)
             setattr(self, s, scenario)
 
@@ -85,7 +107,7 @@ class _Scenario(object):
 
     def next_batch(self, batch_size):
         #randomly select rows
-        idxs = np.random.choice(range(self.x.shape[0]), batch_size)
+        idxs = np.random.choice(range(self.x.shape[0]), batch_size, replace=False)
         return self.x[idxs], self.latlon[idxs]
 
     def generate_epoch(self, batch_size):
@@ -100,6 +122,6 @@ class _Scenario(object):
 
 if __name__ == "__main__":
     #daily_to_monthly()
-    #build_anomaly_table()
+    #build_climatology_table()
     c = ClimateData(BASE_PATH)
     print c.historical.x.shape
